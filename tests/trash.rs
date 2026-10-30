@@ -1,4 +1,4 @@
-use rtrash::Trash;
+use rmtrash::Trash;
 use std::{
     fs,
     os::unix::{ffi::OsStringExt, fs::symlink},
@@ -93,9 +93,9 @@ fn parents_metadata_empty_and_safety() {
 #[test]
 fn cli_force_and_missing_configuration() {
     let t = tempdir().unwrap();
-    let bin = env!("CARGO_BIN_EXE_rtrash");
+    let bin = env!("CARGO_BIN_EXE_rmtrash");
     assert!(!Command::new(bin)
-        .env_remove("RTRASH_DIR")
+        .env_remove("RMTRASH_DIR")
         .arg("--list")
         .status()
         .unwrap()
@@ -129,7 +129,7 @@ fn cross_device_keeps_source_when_available() {
         return;
     }
     let external = tempfile::Builder::new()
-        .prefix("rtrash-test-")
+        .prefix("rmtrash-test-")
         .tempdir_in(other)
         .unwrap();
     let src = external.path().join("file");

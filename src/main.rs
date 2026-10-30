@@ -1,11 +1,11 @@
 use clap::{ArgGroup, Parser};
-use rtrash::Trash;
+use rmtrash::Trash;
 use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
 #[command(version, about = "Manage an independent trash directory", group(ArgGroup::new("operation").args(["list", "restore", "empty"]).multiple(false)))]
 struct Args {
-    #[arg(long, env = "RTRASH_DIR")]
+    #[arg(long, env = "RMTRASH_DIR")]
     trash_dir: Option<PathBuf>,
     #[arg(short, long, conflicts_with_all = ["list", "restore", "empty"])]
     force: bool,
@@ -21,17 +21,17 @@ struct Args {
 fn main() -> ExitCode {
     let args = Args::parse();
     let Some(dir) = args.trash_dir else {
-        eprintln!("rtrash: specify --trash-dir or RTRASH_DIR");
+        eprintln!("rmtrash: specify --trash-dir or RMTRASH_DIR");
         return ExitCode::FAILURE;
     };
     if !args.list && args.restore.is_none() && !args.empty && args.files.is_empty() {
-        eprintln!("rtrash: specify files or an operation");
+        eprintln!("rmtrash: specify files or an operation");
         return ExitCode::FAILURE;
     }
     let trash = match Trash::open(&dir) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("rtrash: {e}");
+            eprintln!("rmtrash: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -50,7 +50,7 @@ fn main() -> ExitCode {
         for p in args.files {
             if let Err(e) = trash.put(&p) {
                 if !args.force {
-                    eprintln!("rtrash: {}: {e}", p.display());
+                    eprintln!("rmtrash: {}: {e}", p.display());
                     failed = true;
                 }
             }
@@ -64,7 +64,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("rtrash: {e}");
+            eprintln!("rmtrash: {e}");
             ExitCode::FAILURE
         }
     }
