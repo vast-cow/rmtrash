@@ -96,6 +96,8 @@ fn cli_force_and_missing_configuration() {
     let bin = env!("CARGO_BIN_EXE_rmtrash");
     assert!(!Command::new(bin)
         .env_remove("RMTRASH_DIR")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("HOME")
         .arg("--list")
         .status()
         .unwrap()
@@ -116,6 +118,58 @@ fn cli_force_and_missing_configuration() {
         .status()
         .unwrap()
         .success());
+}
+#[test]
+fn cli_trash_directory_precedence_and_defaults() {
+    for (explicit, configured, xdg, home, expected) in [
+        (true, true, Some("xdg"), true, "explicit"),
+        (false, true, Some("xdg"), true, "configured"),
+        (false, false, Some("xdg"), true, "xdg/Trash"),
+        (false, false, Some("xdg"), false, "xdg/Trash"),
+        (false, false, None, true, "home/.local/share/Trash"),
+        (false, false, Some(""), true, "home/.local/share/Trash"),
+        (
+            false,
+            false,
+            Some("relative"),
+            true,
+            "home/.local/share/Trash",
+        ),
+        (true, false, None, false, "explicit"),
+        (false, true, None, false, "configured"),
+    ] {
+        let t = tempdir().unwrap();
+        let file = t.path().join("file");
+        fs::write(&file, "content").unwrap();
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_rmtrash"));
+        cmd.current_dir(t.path())
+            .env_remove("RMTRASH_DIR")
+            .env_remove("XDG_DATA_HOME")
+            .env_remove("HOME");
+        if explicit {
+            cmd.arg("--trash-dir").arg(t.path().join("explicit"));
+        }
+        if configured {
+            cmd.env("RMTRASH_DIR", t.path().join("configured"));
+        }
+        if let Some(xdg) = xdg {
+            let path = if xdg == "xdg" {
+                t.path().join(xdg)
+            } else {
+                PathBuf::from(xdg)
+            };
+            cmd.env("XDG_DATA_HOME", path);
+        }
+        if home {
+            cmd.env("HOME", t.path().join("home"));
+        }
+        let output = cmd.arg(&file).output().unwrap();
+        assert!(output.status.success(), "{expected}: {:?}", output);
+        let root = t.path().join(expected);
+        assert_eq!(fs::read(root.join("files/file")).unwrap(), b"content");
+        assert!(root.join("info/file.trashinfo").is_file());
+        assert!(!file.exists());
+    }
 }
 #[test]
 fn cross_device_keeps_source_when_available() {

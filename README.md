@@ -1,6 +1,6 @@
 # rmtrash
 
-`rmtrash` is a Linux CLI for an independent, user-selected trash directory. It never selects the system trash automatically.
+`rmtrash` is a Linux CLI for managing a trash directory. It uses the user's default trash directory unless a custom location is selected.
 
 ## Build and install
 
@@ -8,7 +8,7 @@ Install a stable Rust toolchain, then run `cargo build --release`. Install with 
 
 ## Usage
 
-Select storage using `--trash-dir PATH` or `RMTRASH_DIR`; the option takes precedence.
+Storage is selected in this order: `--trash-dir PATH`, `RMTRASH_DIR`, `$XDG_DATA_HOME/Trash`, then `$HOME/.local/share/Trash`. An unset, empty, or relative `XDG_DATA_HOME` falls back to the HOME location. If no explicit location is given and neither a valid `XDG_DATA_HOME` nor a nonempty `HOME` is available, the command reports an error.
 
 ```sh
 export RMTRASH_DIR="$HOME/my-trash"
@@ -26,4 +26,4 @@ rmtrash --trash-dir /path/to/other-trash --list
 
 The selected directory contains `files/` and `info/`. Each entry has a matching `.trashinfo` file containing a percent-encoded absolute original path and local deletion time, following the freedesktop.org Trash Specification. Name collisions receive numeric suffixes. Symlinks are stored as links.
 
-Unlike `gio trash`, storage is explicitly selected and independent of GIO. Moving across filesystems is unsupported and returns an error without deleting the source. Atomic no-replace renames require Linux and filesystem support for `renameat2`. An interrupted operation may leave orphaned metadata; `--empty` removes both stored entries and metadata. Do not share a trash directory with untrusted users or mutate its directories concurrently with rmtrash. `--empty` permanently deletes its contents.
+Storage is managed directly without GIO. Moving across filesystems is unsupported and returns an error without deleting the source. Atomic no-replace renames require Linux and filesystem support for `renameat2`. An interrupted operation may leave orphaned metadata; `--empty` removes both stored entries and metadata. Do not share a trash directory with untrusted users or mutate its directories concurrently with rmtrash. `--empty` permanently deletes its contents.

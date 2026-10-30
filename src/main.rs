@@ -1,10 +1,11 @@
 use clap::{ArgGroup, Parser};
 use rmtrash::Trash;
-use std::{path::PathBuf, process::ExitCode};
+use std::{env, path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
-#[command(version, about = "Manage an independent trash directory", group(ArgGroup::new("operation").args(["list", "restore", "empty"]).multiple(false)))]
+#[command(version, about = "Manage a trash directory", group(ArgGroup::new("operation").args(["list", "restore", "empty"]).multiple(false)))]
 struct Args {
+    /// Override the default $XDG_DATA_HOME/Trash or $HOME/.local/share/Trash
     #[arg(long, env = "RMTRASH_DIR")]
     trash_dir: Option<PathBuf>,
     #[arg(short, long, conflicts_with_all = ["list", "restore", "empty"])]
@@ -18,10 +19,21 @@ struct Args {
     #[arg(value_name = "FILE")]
     files: Vec<PathBuf>,
 }
+fn default_trash_dir() -> Option<PathBuf> {
+    env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .map(|path| path.join("Trash"))
+        .or_else(|| {
+            env::var_os("HOME")
+                .filter(|home| !home.is_empty())
+                .map(|home| PathBuf::from(home).join(".local/share/Trash"))
+        })
+}
 fn main() -> ExitCode {
     let args = Args::parse();
-    let Some(dir) = args.trash_dir else {
-        eprintln!("rmtrash: specify --trash-dir or RMTRASH_DIR");
+    let Some(dir) = args.trash_dir.or_else(default_trash_dir) else {
+        eprintln!("rmtrash: cannot determine trash directory; set HOME or XDG_DATA_HOME, or specify --trash-dir or RMTRASH_DIR");
         return ExitCode::FAILURE;
     };
     if !args.list && args.restore.is_none() && !args.empty && args.files.is_empty() {
