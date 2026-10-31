@@ -9,6 +9,42 @@ use std::{
 use tempfile::tempdir;
 
 #[test]
+fn duplicate_metadata_keys_use_first_values() {
+    let t = tempdir().unwrap();
+    let root = t.path().join("trash");
+    let trash = Trash::open(&root).unwrap();
+    let file = t.path().join("file");
+    fs::write(&file, "content").unwrap();
+    let uri = trash.put(&file).unwrap();
+    let info = root.join("info/file.trashinfo");
+    let original = fs::read_to_string(&info).unwrap();
+    fs::write(
+        &info,
+        format!("{original}Path=/../../evil\nDeletionDate=invalid\n"),
+    )
+    .unwrap();
+
+    assert_eq!(trash.list().unwrap(), vec![(uri.clone(), file.clone())]);
+    trash.restore(&uri).unwrap();
+    assert_eq!(fs::read(&file).unwrap(), b"content");
+
+    let uri = trash.put(&file).unwrap();
+    let original = fs::read_to_string(&info).unwrap();
+    for invalid in ["Path=/../../evil\n", "DeletionDate=invalid\n"] {
+        fs::write(
+            &info,
+            format!(
+                "[Trash Info]\n{invalid}{}",
+                original.strip_prefix("[Trash Info]\n").unwrap()
+            ),
+        )
+        .unwrap();
+        assert!(trash.list().is_err());
+        assert!(trash.restore(&uri).is_err());
+    }
+}
+
+#[test]
 fn round_trip_files_dirs_symlinks_and_bytes() {
     let t = tempdir().unwrap();
     let trash = Trash::open(&t.path().join("trash")).unwrap();

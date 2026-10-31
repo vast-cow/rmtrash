@@ -208,13 +208,9 @@ impl Trash {
         let mut date = None;
         for line in lines {
             if let Some(v) = line.strip_prefix("Path=") {
-                if p.replace(v).is_some() {
-                    return Err(err("duplicate Path"));
-                }
+                p.get_or_insert(v);
             } else if let Some(v) = line.strip_prefix("DeletionDate=") {
-                if date.replace(v).is_some() {
-                    return Err(err("duplicate DeletionDate"));
-                }
+                date.get_or_insert(v);
             }
         }
         let raw = decode(p.ok_or_else(|| err("missing Path"))?)?;
