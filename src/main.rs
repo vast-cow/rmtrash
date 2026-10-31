@@ -61,7 +61,9 @@ fn main() -> ExitCode {
         let mut failed = false;
         for p in args.files {
             if let Err(e) = trash.put(&p) {
-                if !args.force {
+                let missing = e.kind() == std::io::ErrorKind::NotFound
+                    && matches!(std::fs::symlink_metadata(&p), Err(ref error) if error.kind() == std::io::ErrorKind::NotFound);
+                if !args.force || !missing {
                     eprintln!("rmtrash: {}: {e}", p.display());
                     failed = true;
                 }

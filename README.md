@@ -20,7 +20,7 @@ rmtrash -f missing-file
 rmtrash --trash-dir /path/to/other-trash --list
 ```
 
-`--list` prints an rmtrash-local URI and original path separated by a tab. The URI identifies the stored filename and can be passed to `--restore`; it is not registered with GIO. The displayed original path is for humans and may be lossy for non-UTF-8 names. `--force` suppresses errors for inputs that cannot be trashed. Restores create missing parents and refuse to overwrite a destination.
+`--list` prints an rmtrash-local URI and original path separated by a tab. The URI identifies the stored filename and can be passed to `--restore`; it is not registered with GIO. The displayed original path is for humans and may be lossy for non-UTF-8 names. `--force` suppresses errors for missing inputs; other failures are reported. Restores create missing parents and refuse to overwrite a destination.
 
 ## Storage and limitations
 

@@ -191,6 +191,21 @@ fn cli_force_and_missing_configuration() {
         .status()
         .unwrap()
         .success());
+
+    let trash_root = t.path().join("trash");
+    let file = t.path().join("file");
+    fs::write(&file, "data").unwrap();
+    let output = Command::new(bin)
+        .arg("--trash-dir")
+        .arg(&trash_root)
+        .arg("--force")
+        .arg(&trash_root)
+        .arg(&file)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot trash"));
+    assert!(!file.exists(), "other inputs should still be processed");
 }
 #[test]
 fn cli_trash_directory_precedence_and_defaults() {
