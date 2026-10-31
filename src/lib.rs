@@ -99,6 +99,11 @@ fn remove_entry(p: &Path) -> io::Result<()> {
 pub struct Trash {
     root: PathBuf,
 }
+
+pub struct ListResult {
+    pub entries: Vec<(String, PathBuf)>,
+    pub errors: Vec<(String, io::Error)>,
+}
 impl Trash {
     pub fn open(path: &Path) -> io::Result<Self> {
         if path.as_os_str().is_empty() {
@@ -239,15 +244,19 @@ impl Trash {
         }
         Ok((dest, relative))
     }
-    pub fn list(&self) -> io::Result<Vec<(String, PathBuf)>> {
-        let mut out = Vec::new();
+    pub fn list(&self) -> io::Result<ListResult> {
+        let mut out = ListResult { entries: Vec::new(), errors: Vec::new() };
         for item in fs::read_dir(self.root.join("files"))? {
             let item = item?;
             let name = item.file_name();
-            let (dest, _) = self.destination(&name)?;
-            out.push((format!("trash://{}", encode(name.as_bytes())), dest));
+            let uri = format!("trash://{}", encode(name.as_bytes()));
+            match self.destination(&name) {
+                Ok((dest, _)) => out.entries.push((uri, dest)),
+                Err(error) => out.errors.push((uri, error)),
+            }
         }
-        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out.entries.sort_by(|a, b| a.0.cmp(&b.0));
+        out.errors.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(out)
     }
     pub fn restore(&self, uri: &str) -> io::Result<()> {

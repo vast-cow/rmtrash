@@ -22,6 +22,8 @@ rmtrash --trash-dir /path/to/other-trash --list
 
 `--list` prints an rmtrash-local URI and original path separated by a tab. The URI identifies the stored filename and can be passed to `--restore`; it is not registered with GIO. The displayed original path is for humans and may be lossy for non-UTF-8 names. `--force` suppresses errors for missing inputs; other failures are reported. Restores create missing parents and refuse to overwrite a destination.
 
+If an entry's metadata is missing or invalid, `--list` reports its URI and the error on standard error, continues listing valid entries, and exits unsuccessfully.
+
 ## Storage and limitations
 
 The selected directory contains `files/` and `info/`. Each entry has a matching `.trashinfo` file containing a percent-encoded absolute original path and local deletion time, following the freedesktop.org Trash Specification. Name collisions receive numeric suffixes. Symlinks are stored as links.

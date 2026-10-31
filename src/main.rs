@@ -48,9 +48,18 @@ fn main() -> ExitCode {
         }
     };
     let result = if args.list {
-        trash.list().map(|items| {
-            for (uri, path) in items {
+        trash.list().and_then(|items| {
+            for (uri, path) in items.entries {
                 println!("{}\t{}", uri, path.display());
+            }
+            let failed = !items.errors.is_empty();
+            for (uri, error) in items.errors {
+                eprintln!("rmtrash: {uri}: cannot read metadata: {error}");
+            }
+            if failed {
+                Err(std::io::Error::other("some entries could not be listed"))
+            } else {
+                Ok(())
             }
         })
     } else if let Some(uri) = args.restore {

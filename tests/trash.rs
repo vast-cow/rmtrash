@@ -18,7 +18,7 @@ fn relative_metadata_paths_list_and_restore() {
     let info = root.join("info/item.trashinfo");
     fs::write(&info, "[Trash Info]\nPath=documents/a%20%FF\nDeletionDate=2026-01-01T00:00:00\n").unwrap();
     let destination = base.join("documents").join(std::ffi::OsString::from_vec(b"a \xff".to_vec()));
-    assert_eq!(trash.list().unwrap(), vec![("trash://item".into(), destination.clone())]);
+    assert_eq!(trash.list().unwrap().entries, vec![("trash://item".into(), destination.clone())]);
     trash.restore("trash://item").unwrap();
     assert_eq!(fs::read(destination).unwrap(), b"content");
 }
@@ -33,7 +33,7 @@ fn relative_metadata_rejects_escape_and_trash_overlap() {
     let info = root.join("info/item.trashinfo");
     for path in ["../outside", "%2E%2E/outside", "custom-trash/files/other", ""] {
         fs::write(&info, format!("[Trash Info]\nPath={path}\nDeletionDate=2026-01-01T00:00:00\n")).unwrap();
-        assert!(trash.list().is_err(), "{path}");
+        assert_eq!(trash.list().unwrap().errors.len(), 1, "{path}");
         assert!(trash.restore("trash://item").is_err(), "{path}");
     }
     let outside = t.path().join("outside");
@@ -61,7 +61,7 @@ fn duplicate_metadata_keys_use_first_values() {
     )
     .unwrap();
 
-    assert_eq!(trash.list().unwrap(), vec![(uri.clone(), file.clone())]);
+    assert_eq!(trash.list().unwrap().entries, vec![(uri.clone(), file.clone())]);
     trash.restore(&uri).unwrap();
     assert_eq!(fs::read(&file).unwrap(), b"content");
 
@@ -76,7 +76,7 @@ fn duplicate_metadata_keys_use_first_values() {
             ),
         )
         .unwrap();
-        assert!(trash.list().is_err());
+        assert_eq!(trash.list().unwrap().errors.len(), 1);
         assert!(trash.restore(&uri).is_err());
     }
 }
@@ -90,7 +90,7 @@ fn round_trip_files_dirs_symlinks_and_bytes() {
     fs::write(&file, b"hello").unwrap();
     let uri = trash.put(&file).unwrap();
     assert!(uri.contains("%FF"));
-    assert_eq!(trash.list().unwrap()[0].1, file);
+    assert_eq!(trash.list().unwrap().entries[0].1, file);
     trash.restore(&uri).unwrap();
     assert_eq!(fs::read(&file).unwrap(), b"hello");
     let dir = t.path().join("dir");
@@ -119,10 +119,11 @@ fn collisions_concurrency_and_conflicts() {
         threads.push(std::thread::spawn(move || tr.put(&file).unwrap()));
     }
     let uris: Vec<_> = threads.into_iter().map(|x| x.join().unwrap()).collect();
-    assert_eq!(trash.list().unwrap().len(), 8);
+    assert_eq!(trash.list().unwrap().entries.len(), 8);
     let dest = trash
         .list()
         .unwrap()
+        .entries
         .into_iter()
         .find(|x| x.0 == uris[0])
         .unwrap()
@@ -130,7 +131,7 @@ fn collisions_concurrency_and_conflicts() {
     fs::write(&dest, "conflict").unwrap();
     assert!(trash.restore(&uris[0]).is_err());
     assert_eq!(fs::read_to_string(dest).unwrap(), "conflict");
-    assert_eq!(trash.list().unwrap().len(), 8);
+    assert_eq!(trash.list().unwrap().entries.len(), 8);
 }
 #[test]
 fn parents_metadata_empty_and_safety() {
@@ -279,5 +280,33 @@ fn cross_device_keeps_source_when_available() {
     let trash = Trash::open(&t.path().join("trash")).unwrap();
     assert!(trash.put(&src).is_err());
     assert_eq!(fs::read_to_string(src).unwrap(), "safe");
-    assert!(trash.list().unwrap().is_empty());
+    assert!(trash.list().unwrap().entries.is_empty());
+}
+
+#[test]
+fn list_reports_bad_metadata_and_keeps_valid_entries() {
+    let t = tempdir().unwrap();
+    let root = t.path().join("trash");
+    let trash = Trash::open(&root).unwrap();
+    let file = t.path().join("good");
+    fs::write(&file, "content").unwrap();
+    let uri = trash.put(&file).unwrap();
+    fs::write(root.join("files/missing"), "data").unwrap();
+    fs::write(root.join("files/invalid"), "data").unwrap();
+    fs::write(root.join("info/invalid.trashinfo"), "invalid").unwrap();
+
+    let result = trash.list().unwrap();
+    assert_eq!(result.entries, vec![(uri, file.clone())]);
+    assert_eq!(result.errors.len(), 2);
+    assert_eq!(result.errors[0].0, "trash://invalid");
+    assert_eq!(result.errors[1].0, "trash://missing");
+    assert_eq!(result.errors[1].1.kind(), std::io::ErrorKind::NotFound);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rmtrash"))
+        .arg("--trash-dir").arg(&root).arg("--list").output().unwrap();
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), format!("trash://good\t{}\n", file.display()));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("trash://missing: cannot read metadata"));
+    assert!(stderr.contains("trash://invalid: cannot read metadata: invalid metadata header"));
 }
