@@ -9,6 +9,43 @@ use std::{
 use tempfile::tempdir;
 
 #[test]
+fn relative_metadata_paths_list_and_restore() {
+    let t = tempdir().unwrap();
+    let base = t.path().join("data");
+    let root = base.join("Trash");
+    let trash = Trash::open(&root).unwrap();
+    fs::write(root.join("files/item"), b"content").unwrap();
+    let info = root.join("info/item.trashinfo");
+    fs::write(&info, "[Trash Info]\nPath=documents/a%20%FF\nDeletionDate=2026-01-01T00:00:00\n").unwrap();
+    let destination = base.join("documents").join(std::ffi::OsString::from_vec(b"a \xff".to_vec()));
+    assert_eq!(trash.list().unwrap(), vec![("trash://item".into(), destination.clone())]);
+    trash.restore("trash://item").unwrap();
+    assert_eq!(fs::read(destination).unwrap(), b"content");
+}
+
+#[test]
+fn relative_metadata_rejects_escape_and_trash_overlap() {
+    let t = tempdir().unwrap();
+    let base = t.path().join("data");
+    let root = base.join("custom-trash");
+    let trash = Trash::open(&root).unwrap();
+    fs::write(root.join("files/item"), b"content").unwrap();
+    let info = root.join("info/item.trashinfo");
+    for path in ["../outside", "%2E%2E/outside", "custom-trash/files/other", ""] {
+        fs::write(&info, format!("[Trash Info]\nPath={path}\nDeletionDate=2026-01-01T00:00:00\n")).unwrap();
+        assert!(trash.list().is_err(), "{path}");
+        assert!(trash.restore("trash://item").is_err(), "{path}");
+    }
+    let outside = t.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    symlink(&outside, base.join("link")).unwrap();
+    fs::write(&info, "[Trash Info]\nPath=link/new/item\nDeletionDate=2026-01-01T00:00:00\n").unwrap();
+    assert!(trash.restore("trash://item").is_err());
+    assert!(!outside.join("new").exists());
+    assert!(root.join("files/item").exists());
+}
+
+#[test]
 fn duplicate_metadata_keys_use_first_values() {
     let t = tempdir().unwrap();
     let root = t.path().join("trash");

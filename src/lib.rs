@@ -188,7 +188,7 @@ impl Trash {
         n.push(".trashinfo");
         self.root.join("info").join(n)
     }
-    fn destination(&self, name: &OsStr) -> io::Result<PathBuf> {
+    fn destination(&self, name: &OsStr) -> io::Result<(PathBuf, bool)> {
         let path = self.info(name);
         let m = fs::symlink_metadata(&path)?;
         if !m.file_type().is_file() {
@@ -214,9 +214,8 @@ impl Trash {
             }
         }
         let raw = decode(p.ok_or_else(|| err("missing Path"))?)?;
-        let dest = PathBuf::from(OsString::from_vec(raw));
-        if !dest.is_absolute()
-            || dest.components().any(|c| {
+        let mut dest = PathBuf::from(OsString::from_vec(raw));
+        if dest.components().any(|c| {
                 matches!(
                     c,
                     std::path::Component::ParentDir | std::path::Component::CurDir
@@ -226,6 +225,10 @@ impl Trash {
         {
             return Err(err("unsafe destination path"));
         }
+        let relative = dest.is_relative();
+        if relative {
+            dest = self.root.parent().ok_or_else(|| err("invalid trash root"))?.join(dest);
+        }
         chrono::NaiveDateTime::parse_from_str(
             date.ok_or_else(|| err("missing DeletionDate"))?,
             "%Y-%m-%dT%H:%M:%S",
@@ -234,14 +237,14 @@ impl Trash {
         if dest.starts_with(&self.root) || self.root.starts_with(&dest) {
             return Err(err("destination overlaps trash"));
         }
-        Ok(dest)
+        Ok((dest, relative))
     }
     pub fn list(&self) -> io::Result<Vec<(String, PathBuf)>> {
         let mut out = Vec::new();
         for item in fs::read_dir(self.root.join("files"))? {
             let item = item?;
             let name = item.file_name();
-            let dest = self.destination(&name)?;
+            let (dest, _) = self.destination(&name)?;
             out.push((format!("trash://{}", encode(name.as_bytes())), dest));
         }
         out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -249,10 +252,31 @@ impl Trash {
     }
     pub fn restore(&self, uri: &str) -> io::Result<()> {
         let name = Self::name(uri)?;
-        let dest = self.destination(&name)?;
+        let (dest, relative) = self.destination(&name)?;
         let parent = dest.parent().ok_or_else(|| err("invalid destination"))?;
+        // Check existing ancestors before creating directories, so a symlink cannot
+        // redirect a relative destination outside the trash's parent directory.
+        let base = self.root.parent().ok_or_else(|| err("invalid trash root"))?;
+        if relative {
+            let relative = parent.strip_prefix(base).map_err(|_| err("unsafe destination path"))?;
+            let mut current = base.to_path_buf();
+            for component in relative.components() {
+                current.push(component);
+                match fs::canonicalize(&current) {
+                    Ok(actual) if !actual.starts_with(base) => {
+                        return Err(err("destination escapes trash parent"));
+                    }
+                    Ok(_) => {}
+                    Err(e) if e.kind() == io::ErrorKind::NotFound => break,
+                    Err(e) => return Err(e),
+                }
+            }
+        }
         fs::create_dir_all(parent)?;
         let actual_parent = fs::canonicalize(parent)?;
+        if relative && !actual_parent.starts_with(base) {
+            return Err(err("destination escapes trash parent"));
+        }
         let actual_dest =
             actual_parent.join(dest.file_name().ok_or_else(|| err("invalid destination"))?);
         if actual_dest.starts_with(&self.root) || self.root.starts_with(&actual_dest) {
