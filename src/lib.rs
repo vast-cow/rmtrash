@@ -5,7 +5,7 @@ use std::{
     io::{self, Write},
     os::unix::{
         ffi::{OsStrExt, OsStringExt},
-        fs::OpenOptionsExt,
+        fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     },
     path::{Path, PathBuf},
 };
@@ -96,6 +96,46 @@ fn remove_entry(p: &Path) -> io::Result<()> {
     }
 }
 
+// Check explicitly selected freedesktop per-user trash locations before creating
+// anything beneath them. Arbitrary custom trash directory names remain supported.
+fn verify_external_trash(path: &Path) -> io::Result<()> {
+    if path.components().any(|c| matches!(c, std::path::Component::ParentDir))
+        && path.components().any(|c| c.as_os_str() == ".Trash")
+    {
+        return Err(err("parent traversal in shared .Trash path"));
+    }
+    let uid = unsafe { libc::geteuid() };
+    let name = path.file_name().unwrap_or_default().as_bytes();
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let shared = parent.file_name().is_some_and(|n| n == ".Trash");
+    let private = name.starts_with(b".Trash-")
+        && !name[b".Trash-".len()..].is_empty()
+        && name[b".Trash-".len()..].iter().all(u8::is_ascii_digit);
+    if !shared && !private {
+        return Ok(());
+    }
+    let expected = uid.to_string();
+    if (shared && name != expected.as_bytes())
+        || (private && &name[b".Trash-".len()..] != expected.as_bytes())
+    {
+        return Err(err("trash directory UID does not match current user"));
+    }
+    if shared {
+        let meta = fs::symlink_metadata(parent)?;
+        if !meta.file_type().is_dir() || meta.mode() & libc::S_ISVTX == 0 {
+            return Err(err("shared .Trash must be a real directory with the sticky bit set"));
+        }
+    }
+    match fs::symlink_metadata(path) {
+        Ok(meta) if !meta.file_type().is_dir() || meta.uid() != uid => {
+            Err(err("per-user trash must be a real directory owned by the current user"))
+        }
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
 pub struct Trash {
     root: PathBuf,
 }
@@ -109,7 +149,9 @@ impl Trash {
         if path.as_os_str().is_empty() {
             return Err(err("empty trash directory"));
         }
-        fs::create_dir_all(path)?;
+        verify_external_trash(path)?;
+        fs::DirBuilder::new().recursive(true).mode(0o700).create(path)?;
+        verify_external_trash(path)?;
         let meta = fs::symlink_metadata(path)?;
         if !meta.file_type().is_dir() {
             return Err(err("trash root must be a real directory"));

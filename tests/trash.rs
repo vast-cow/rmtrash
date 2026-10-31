@@ -1,12 +1,38 @@
 use rmtrash::Trash;
 use std::{
     fs,
-    os::unix::{ffi::OsStringExt, fs::symlink},
+    os::unix::{ffi::OsStringExt, fs::{symlink, PermissionsExt}},
     path::PathBuf,
     process::Command,
     sync::Arc,
 };
 use tempfile::tempdir;
+
+#[test]
+fn explicitly_selected_external_trash_is_verified() {
+    let t = tempdir().unwrap();
+    let uid = unsafe { libc::geteuid() };
+    let shared = t.path().join(".Trash");
+    let user = shared.join(uid.to_string());
+    fs::create_dir(&shared).unwrap();
+    assert!(Trash::open(&user).is_err());
+    assert!(!user.exists());
+    fs::set_permissions(&shared, fs::Permissions::from_mode(0o1777)).unwrap();
+    Trash::open(&user).unwrap();
+    assert!(Trash::open(&shared.join(uid.to_string()).join("..").join(uid.to_string())).is_err());
+    assert_eq!(fs::metadata(&user).unwrap().permissions().mode() & 0o777, 0o700);
+    assert!(Trash::open(&shared.join(format!("{}", u64::from(uid) + 1))).is_err());
+
+    let private = t.path().join(format!(".Trash-{uid}"));
+    Trash::open(&private).unwrap();
+    assert!(Trash::open(&t.path().join(format!(".Trash-{}", u64::from(uid) + 1))).is_err());
+    let other = tempdir().unwrap();
+    symlink(&shared, other.path().join(".Trash")).unwrap();
+    assert!(Trash::open(&other.path().join(".Trash").join(uid.to_string())).is_err());
+    let other_private = other.path().join(format!(".Trash-{uid}"));
+    symlink(&private, &other_private).unwrap();
+    assert!(Trash::open(&other_private).is_err());
+}
 
 #[test]
 fn relative_metadata_paths_list_and_restore() {
