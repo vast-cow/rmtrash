@@ -28,6 +28,8 @@ If an entry's metadata is missing or invalid, `--list` reports its URI and the e
 
 The selected directory contains `files/` and `info/`. Each entry has a matching `.trashinfo` file containing a percent-encoded absolute original path and local deletion time, following the freedesktop.org Trash Specification. Name collisions receive numeric suffixes. Symlinks are stored as links.
 
+For trashed directories, `directorysizes` caches allocated disk space and the corresponding metadata modification time. It is rebuilt after directory trashing, restoration, and emptying; entries that cannot be scanned are omitted. Cache updates are best effort, so they do not change the result of a completed trash operation.
+
 When reading metadata from other implementations, relative original paths are resolved against the selected trash directory's parent. Paths containing `..` or escaping that parent through a symlink are rejected during restoration.
 
 Storage is managed directly without GIO. Moving across filesystems is unsupported and returns an error without deleting the source. Atomic no-replace renames require Linux and filesystem support for `renameat2`. An interrupted operation may leave orphaned metadata; `--empty` removes both stored entries and metadata. Do not share a trash directory with untrusted users or mutate its directories concurrently with rmtrash. `--empty` permanently deletes its contents.

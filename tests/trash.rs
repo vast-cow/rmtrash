@@ -131,6 +131,32 @@ fn round_trip_files_dirs_symlinks_and_bytes() {
     trash.restore(&uri).unwrap();
     assert_eq!(fs::read_link(link).unwrap(), PathBuf::from("missing"));
 }
+
+#[test]
+fn directorysizes_tracks_directories_and_removes_stale_entries() {
+    use std::os::unix::fs::MetadataExt;
+    let t = tempdir().unwrap();
+    let root = t.path().join("trash");
+    let trash = Trash::open(&root).unwrap();
+    let name = std::ffi::OsString::from_vec(b"dir %\xff".to_vec());
+    let dir = t.path().join(&name);
+    fs::create_dir(&dir).unwrap();
+    fs::write(dir.join("file"), vec![1; 8192]).unwrap();
+    fs::hard_link(dir.join("file"), dir.join("hardlink")).unwrap();
+    symlink("file", dir.join("link")).unwrap();
+    let size: u64 = [dir.clone(), dir.join("file"), dir.join("link")]
+        .iter().map(|p| fs::symlink_metadata(p).unwrap().blocks() * 512).sum();
+    let uri = trash.put(&dir).unwrap();
+    let info = root.join("info").join({ let mut n = name.clone(); n.push(".trashinfo"); n });
+    let expected = format!("{} {} dir%20%25%FF\n", size, fs::metadata(info).unwrap().mtime());
+    assert_eq!(fs::read_to_string(root.join("directorysizes")).unwrap(), expected);
+    trash.restore(&uri).unwrap();
+    assert_eq!(fs::read_to_string(root.join("directorysizes")).unwrap(), "");
+    trash.put(&dir).unwrap();
+    fs::write(root.join("directorysizes"), "123 456 stale\n").unwrap();
+    trash.empty().unwrap();
+    assert_eq!(fs::read_to_string(root.join("directorysizes")).unwrap(), "");
+}
 #[test]
 fn collisions_concurrency_and_conflicts() {
     let t = tempdir().unwrap();

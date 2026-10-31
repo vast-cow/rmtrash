@@ -1,5 +1,6 @@
 //! Independent Linux trash storage.
 use std::{
+    collections::HashSet,
     ffi::{CString, OsStr, OsString},
     fs::{self, OpenOptions},
     io::{self, Write},
@@ -8,6 +9,7 @@ use std::{
         fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     },
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 fn err(s: &str) -> io::Error {
@@ -96,6 +98,26 @@ fn remove_entry(p: &Path) -> io::Result<()> {
     }
 }
 
+// Match du's default behavior: count allocated blocks, do not follow symlinks,
+// and count hard-linked inodes only once per directory tree.
+fn directory_size(path: &Path, seen: &mut HashSet<(u64, u64)>) -> io::Result<u64> {
+    let meta = fs::symlink_metadata(path)?;
+    if !seen.insert((meta.dev(), meta.ino())) {
+        return Ok(0);
+    }
+    let mut size = meta.blocks().checked_mul(512)
+        .ok_or_else(|| err("directory size overflow"))?;
+    if meta.file_type().is_dir() {
+        for entry in fs::read_dir(path)? {
+            size = size.checked_add(directory_size(&entry?.path(), seen)?)
+                .ok_or_else(|| err("directory size overflow"))?;
+        }
+    }
+    Ok(size)
+}
+
+static CACHE_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
 // Check explicitly selected freedesktop per-user trash locations before creating
 // anything beneath them. Arbitrary custom trash directory names remain supported.
 fn verify_external_trash(path: &Path) -> io::Result<()> {
@@ -145,6 +167,47 @@ pub struct ListResult {
     pub errors: Vec<(String, io::Error)>,
 }
 impl Trash {
+    // The cache is optional: a failed scan or write must not turn a successful
+    // move into an apparent failure. Never publish a partially written cache.
+    fn update_directorysizes(&self) -> io::Result<()> {
+        let mut lines = Vec::new();
+        for entry in fs::read_dir(self.root.join("files"))? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            let info = match fs::symlink_metadata(self.info(&name)) {
+                Ok(info) if info.file_type().is_file() => info,
+                _ => continue,
+            };
+            let size = match directory_size(&entry.path(), &mut HashSet::new()) {
+                Ok(size) => size,
+                Err(_) => continue,
+            };
+            lines.push(format!("{} {} {}\n", size, info.mtime(), encode(name.as_bytes())));
+        }
+        lines.sort_unstable();
+        let (path, mut file) = loop {
+            let id = CACHE_TEMP_ID.fetch_add(1, Ordering::Relaxed);
+            let path = self.root.join(format!(".directorysizes.{}.{}", std::process::id(), id));
+            match OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path) {
+                Ok(file) => break (path, file),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            }
+        };
+        let result = (|| {
+            for line in lines {
+                file.write_all(line.as_bytes())?;
+            }
+            fs::rename(&path, self.root.join("directorysizes"))
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(path);
+        }
+        result
+    }
     pub fn open(path: &Path) -> io::Result<Self> {
         if path.as_os_str().is_empty() {
             return Err(err("empty trash directory"));
@@ -208,7 +271,12 @@ impl Trash {
                 rename_noreplace(&src, &file)
             })();
             match result {
-                Ok(()) => return Ok(format!("trash://{}", encode(&candidate))),
+                Ok(()) => {
+                    if meta.file_type().is_dir() {
+                        let _ = self.update_directorysizes();
+                    }
+                    return Ok(format!("trash://{}", encode(&candidate)));
+                }
                 Err(e) => {
                     fs::remove_file(&info)?;
                     if e.kind() == io::ErrorKind::AlreadyExists {
@@ -334,14 +402,20 @@ impl Trash {
             return Err(err("destination overlaps trash"));
         }
         rename_noreplace(&self.root.join("files").join(&name), &actual_dest)?;
-        fs::remove_file(self.info(&name))
+        let result = fs::remove_file(self.info(&name));
+        let _ = self.update_directorysizes();
+        result
     }
     pub fn empty(&self) -> io::Result<()> {
-        for dir in ["files", "info"] {
-            for e in fs::read_dir(self.root.join(dir))? {
-                remove_entry(&e?.path())?;
+        let result = (|| {
+            for dir in ["files", "info"] {
+                for e in fs::read_dir(self.root.join(dir))? {
+                    remove_entry(&e?.path())?;
+                }
             }
-        }
-        Ok(())
+            Ok(())
+        })();
+        let _ = self.update_directorysizes();
+        result
     }
 }
