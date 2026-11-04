@@ -55,17 +55,17 @@ jobs:
           cargo build --release --locked --target "$TARGET"
           "target/$TARGET/release/rmtrash" --help > /dev/null
 
-      - name: Package binary
+      - name: Prepare binary
         env:
           TARGET: ${{ matrix.target }}
         run: |
           mkdir -p dist
-          tar -czf "dist/rmtrash-$TARGET.tar.gz" -C "target/$TARGET/release" rmtrash
+          cp "target/$TARGET/release/rmtrash" "dist/rmtrash-$TARGET"
 
       - uses: actions/upload-artifact@v4
         with:
           name: rmtrash-${{ matrix.target }}
-          path: dist/*.tar.gz
+          path: dist/rmtrash-${{ matrix.target }}
           if-no-files-found: error
 
   publish:
@@ -106,17 +106,13 @@ jobs:
           print(f"Next release: {tag}")
           PY
 
-      - name: Generate checksums
-        working-directory: dist
-        run: sha256sum ./*.tar.gz > SHA256SUMS
-
       # gh creates the tag at this run's commit, rather than the latest main.
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh release create "$RELEASE_TAG" dist/*.tar.gz dist/SHA256SUMS \
+          gh release create "$RELEASE_TAG" dist/rmtrash-* \
             --target "$GITHUB_SHA" \
             --title "$RELEASE_TAG" \
             --generate-notes

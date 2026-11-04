@@ -24,10 +24,10 @@ Release tags are independent of the package version in `Cargo.toml` and the
 version printed by `rmtrash --version`.
 
 The workflow creates the tag at the triggering commit and publishes a GitHub
-release with generated notes, `rmtrash-x86_64-unknown-linux-musl.tar.gz`,
-`rmtrash-aarch64-unknown-linux-musl.tar.gz`, and `SHA256SUMS`. Each archive contains
-the executable `rmtrash`. Extract the archive matching your architecture and
-place the executable on your `PATH`.
+release with generated notes and only the two executables:
+`rmtrash-x86_64-unknown-linux-musl` and `rmtrash-aarch64-unknown-linux-musl`.
+Download the executable matching your architecture, rename it to `rmtrash`,
+mark it executable with `chmod +x rmtrash`, and place it on your `PATH`.
 
 Publication uses the built-in `GITHUB_TOKEN` with `contents: write`; no personal
 access token is required. Repository rules must allow this token to create
