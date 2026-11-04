@@ -1,7 +1,10 @@
 use rmtrash::Trash;
 use std::{
     fs,
-    os::unix::{ffi::OsStringExt, fs::{symlink, PermissionsExt}},
+    os::unix::{
+        ffi::OsStringExt,
+        fs::{symlink, PermissionsExt},
+    },
     path::PathBuf,
     process::Command,
     sync::Arc,
@@ -19,8 +22,17 @@ fn explicitly_selected_external_trash_is_verified() {
     assert!(!user.exists());
     fs::set_permissions(&shared, fs::Permissions::from_mode(0o1777)).unwrap();
     Trash::open(&user).unwrap();
-    assert!(Trash::open(&shared.join(uid.to_string()).join("..").join(uid.to_string())).is_err());
-    assert_eq!(fs::metadata(&user).unwrap().permissions().mode() & 0o777, 0o700);
+    assert!(Trash::open(
+        &shared
+            .join(uid.to_string())
+            .join("..")
+            .join(uid.to_string())
+    )
+    .is_err());
+    assert_eq!(
+        fs::metadata(&user).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
     assert!(Trash::open(&shared.join(format!("{}", u64::from(uid) + 1))).is_err());
 
     let private = t.path().join(format!(".Trash-{uid}"));
@@ -42,9 +54,18 @@ fn relative_metadata_paths_list_and_restore() {
     let trash = Trash::open(&root).unwrap();
     fs::write(root.join("files/item"), b"content").unwrap();
     let info = root.join("info/item.trashinfo");
-    fs::write(&info, "[Trash Info]\nPath=documents/a%20%FF\nDeletionDate=2026-01-01T00:00:00\n").unwrap();
-    let destination = base.join("documents").join(std::ffi::OsString::from_vec(b"a \xff".to_vec()));
-    assert_eq!(trash.list().unwrap().entries, vec![("trash://item".into(), destination.clone())]);
+    fs::write(
+        &info,
+        "[Trash Info]\nPath=documents/a%20%FF\nDeletionDate=2026-01-01T00:00:00\n",
+    )
+    .unwrap();
+    let destination = base
+        .join("documents")
+        .join(std::ffi::OsString::from_vec(b"a \xff".to_vec()));
+    assert_eq!(
+        trash.list().unwrap().entries,
+        vec![("trash://item".into(), destination.clone())]
+    );
     trash.restore("trash://item").unwrap();
     assert_eq!(fs::read(destination).unwrap(), b"content");
 }
@@ -57,15 +78,28 @@ fn relative_metadata_rejects_escape_and_trash_overlap() {
     let trash = Trash::open(&root).unwrap();
     fs::write(root.join("files/item"), b"content").unwrap();
     let info = root.join("info/item.trashinfo");
-    for path in ["../outside", "%2E%2E/outside", "custom-trash/files/other", ""] {
-        fs::write(&info, format!("[Trash Info]\nPath={path}\nDeletionDate=2026-01-01T00:00:00\n")).unwrap();
+    for path in [
+        "../outside",
+        "%2E%2E/outside",
+        "custom-trash/files/other",
+        "",
+    ] {
+        fs::write(
+            &info,
+            format!("[Trash Info]\nPath={path}\nDeletionDate=2026-01-01T00:00:00\n"),
+        )
+        .unwrap();
         assert_eq!(trash.list().unwrap().errors.len(), 1, "{path}");
         assert!(trash.restore("trash://item").is_err(), "{path}");
     }
     let outside = t.path().join("outside");
     fs::create_dir(&outside).unwrap();
     symlink(&outside, base.join("link")).unwrap();
-    fs::write(&info, "[Trash Info]\nPath=link/new/item\nDeletionDate=2026-01-01T00:00:00\n").unwrap();
+    fs::write(
+        &info,
+        "[Trash Info]\nPath=link/new/item\nDeletionDate=2026-01-01T00:00:00\n",
+    )
+    .unwrap();
     assert!(trash.restore("trash://item").is_err());
     assert!(!outside.join("new").exists());
     assert!(root.join("files/item").exists());
@@ -87,7 +121,10 @@ fn duplicate_metadata_keys_use_first_values() {
     )
     .unwrap();
 
-    assert_eq!(trash.list().unwrap().entries, vec![(uri.clone(), file.clone())]);
+    assert_eq!(
+        trash.list().unwrap().entries,
+        vec![(uri.clone(), file.clone())]
+    );
     trash.restore(&uri).unwrap();
     assert_eq!(fs::read(&file).unwrap(), b"content");
 
@@ -145,11 +182,24 @@ fn directorysizes_tracks_directories_and_removes_stale_entries() {
     fs::hard_link(dir.join("file"), dir.join("hardlink")).unwrap();
     symlink("file", dir.join("link")).unwrap();
     let size: u64 = [dir.clone(), dir.join("file"), dir.join("link")]
-        .iter().map(|p| fs::symlink_metadata(p).unwrap().blocks() * 512).sum();
+        .iter()
+        .map(|p| fs::symlink_metadata(p).unwrap().blocks() * 512)
+        .sum();
     let uri = trash.put(&dir).unwrap();
-    let info = root.join("info").join({ let mut n = name.clone(); n.push(".trashinfo"); n });
-    let expected = format!("{} {} dir%20%25%FF\n", size, fs::metadata(info).unwrap().mtime());
-    assert_eq!(fs::read_to_string(root.join("directorysizes")).unwrap(), expected);
+    let info = root.join("info").join({
+        let mut n = name.clone();
+        n.push(".trashinfo");
+        n
+    });
+    let expected = format!(
+        "{} {} dir%20%25%FF\n",
+        size,
+        fs::metadata(info).unwrap().mtime()
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("directorysizes")).unwrap(),
+        expected
+    );
     trash.restore(&uri).unwrap();
     assert_eq!(fs::read_to_string(root.join("directorysizes")).unwrap(), "");
     trash.put(&dir).unwrap();
@@ -401,9 +451,16 @@ fn list_reports_bad_metadata_and_keeps_valid_entries() {
     assert_eq!(result.errors[1].1.kind(), std::io::ErrorKind::NotFound);
 
     let output = Command::new(env!("CARGO_BIN_EXE_rmtrash"))
-        .arg("--trash-dir").arg(&root).arg("--list").output().unwrap();
+        .arg("--trash-dir")
+        .arg(&root)
+        .arg("--list")
+        .output()
+        .unwrap();
     assert!(!output.status.success());
-    assert_eq!(String::from_utf8(output.stdout).unwrap(), format!("trash://good\t{}\n", file.display()));
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("trash://good\t{}\n", file.display())
+    );
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("trash://missing: cannot read metadata"));
     assert!(stderr.contains("trash://invalid: cannot read metadata: invalid metadata header"));
