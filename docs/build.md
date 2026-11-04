@@ -4,6 +4,35 @@
 
 Install a stable Rust toolchain, then run `cargo build --release`. Install with `cargo install --path .`.
 
+## Automated GitHub releases
+
+The [release workflow](../.github/workflows/release.yml) runs on pushes to `main`.
+It can also be started from the Actions tab with **Run workflow**, selecting
+`main`. Runs are serialized to prevent concurrent version selection.
+
+Each run tests and builds with stable Rust and `Cargo.lock` on native GitHub
+Ubuntu runners for `x86_64-unknown-linux-musl` and
+`aarch64-unknown-linux-musl`. The ARM build uses `ubuntu-24.04-arm`, which is
+available for public repositories; private repositories need an eligible ARM
+runner. Both builds must succeed before publication.
+
+The workflow fetches all tags and selects the numerically highest exact
+`vMAJOR.MINOR.PATCH` tag, then increments its patch number. For example,
+`v1.10.9` becomes `v1.10.10`. Prerelease tags, build metadata, leading-zero
+versions, and other names are ignored. With no matching tags, it uses `v0.0.1`.
+Release tags are independent of the package version in `Cargo.toml` and the
+version printed by `rmtrash --version`.
+
+The workflow creates the tag at the triggering commit and publishes a GitHub
+release with generated notes, `rmtrash-x86_64-unknown-linux-musl.tar.gz`,
+`rmtrash-aarch64-unknown-linux-musl.tar.gz`, and `SHA256SUMS`. Each archive contains
+the executable `rmtrash`. Extract the archive matching your architecture and
+place the executable on your `PATH`.
+
+Publication uses the built-in `GITHUB_TOKEN` with `contents: write`; no personal
+access token is required. Repository rules must allow this token to create
+release tags and releases. Failed builds create neither tags nor releases.
+
 ## Release profile
 
 The release profile favors a small executable: size optimization (`z`), fat LTO,
