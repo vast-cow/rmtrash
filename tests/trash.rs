@@ -158,9 +158,34 @@ fn directorysizes_tracks_directories_and_removes_stale_entries() {
     assert_eq!(fs::read_to_string(root.join("directorysizes")).unwrap(), "");
 }
 #[test]
+fn collision_with_untracked_trash_file_preserves_contents() {
+    let t = tempdir().unwrap();
+    let root = t.path().join("trash");
+    let trash = Trash::open(&root).unwrap();
+    let source = t.path().join("file");
+    fs::write(&source, "new").unwrap();
+    fs::write(root.join("files/file"), "existing").unwrap();
+
+    let uri = trash.put(&source).unwrap();
+    assert_ne!(uri, "trash://file");
+    assert_eq!(
+        fs::read_to_string(root.join("files/file")).unwrap(),
+        "existing"
+    );
+    assert!(!root.join("info/file.trashinfo").exists());
+    trash.restore(&uri).unwrap();
+    assert_eq!(fs::read_to_string(source).unwrap(), "new");
+    assert_eq!(
+        fs::read_to_string(root.join("files/file")).unwrap(),
+        "existing"
+    );
+}
+
+#[test]
 fn collisions_concurrency_and_conflicts() {
     let t = tempdir().unwrap();
-    let trash = Arc::new(Trash::open(&t.path().join("trash")).unwrap());
+    let root = t.path().join("trash");
+    let trash = Arc::new(Trash::open(&root).unwrap());
     let mut threads = vec![];
     for i in 0..8 {
         let parent = t.path().join(i.to_string());
@@ -172,6 +197,13 @@ fn collisions_concurrency_and_conflicts() {
     }
     let uris: Vec<_> = threads.into_iter().map(|x| x.join().unwrap()).collect();
     assert_eq!(trash.list().unwrap().entries.len(), 8);
+    for (i, uri) in uris.iter().enumerate() {
+        let name = uri.strip_prefix("trash://").unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("files").join(name)).unwrap(),
+            i.to_string()
+        );
+    }
     let dest = trash
         .list()
         .unwrap()
@@ -181,8 +213,19 @@ fn collisions_concurrency_and_conflicts() {
         .unwrap()
         .1;
     fs::write(&dest, "conflict").unwrap();
-    assert!(trash.restore(&uris[0]).is_err());
+    let name = uris[0].strip_prefix("trash://").unwrap();
+    let info = root.join("info").join(format!("{name}.trashinfo"));
+    let metadata = fs::read(&info).unwrap();
+    assert_eq!(
+        trash.restore(&uris[0]).unwrap_err().raw_os_error(),
+        Some(libc::EEXIST)
+    );
     assert_eq!(fs::read_to_string(dest).unwrap(), "conflict");
+    assert_eq!(
+        fs::read_to_string(root.join("files").join(name)).unwrap(),
+        "0"
+    );
+    assert_eq!(fs::read(info).unwrap(), metadata);
     assert_eq!(trash.list().unwrap().entries.len(), 8);
 }
 #[test]
@@ -330,7 +373,10 @@ fn cross_device_keeps_source_when_available() {
     let src = external.path().join("file");
     fs::write(&src, "safe").unwrap();
     let trash = Trash::open(&t.path().join("trash")).unwrap();
-    assert!(trash.put(&src).is_err());
+    assert_eq!(
+        trash.put(&src).unwrap_err().raw_os_error(),
+        Some(libc::EXDEV)
+    );
     assert_eq!(fs::read_to_string(src).unwrap(), "safe");
     assert!(trash.list().unwrap().entries.is_empty());
 }

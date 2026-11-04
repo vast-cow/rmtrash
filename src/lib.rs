@@ -53,7 +53,10 @@ fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
     let a = CString::new(from.as_os_str().as_bytes()).map_err(|_| err("NUL in path"))?;
     let b = CString::new(to.as_os_str().as_bytes()).map_err(|_| err("NUL in path"))?;
     let rc = unsafe {
-        libc::renameat2(
+        // Use the Linux syscall directly: older musl versions lack the libc wrapper.
+        // Keep RENAME_NOREPLACE atomic and propagate unsupported-operation errors.
+        libc::syscall(
+            libc::SYS_renameat2,
             libc::AT_FDCWD,
             a.as_ptr(),
             libc::AT_FDCWD,
